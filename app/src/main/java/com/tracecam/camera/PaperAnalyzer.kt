@@ -7,7 +7,7 @@ import com.tracecam.cv.FrameGeometry
 import com.tracecam.cv.PaperDetection
 import com.tracecam.cv.PaperDetector
 import com.tracecam.cv.PixelRect
-import org.opencv.android.OpenCVLoader
+import com.tracecam.imaging.OpenCv
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
@@ -32,10 +32,6 @@ class PaperAnalyzer(
     }
 
     private val pending = AtomicReference<Request?>(null)
-
-    private val openCvLoaded: Boolean by lazy {
-        OpenCVLoader.initLocal().also { if (!it) Log.e(TAG, "Failed to load OpenCV") }
-    }
 
     /**
      * Tries up to [maxFrames] frames to find the paper, then calls [onResult] once on the
@@ -64,14 +60,14 @@ class PaperAnalyzer(
                 null
             }
             request.framesTried++
-            if (detection != null || request.framesTried >= request.maxFrames || !openCvLoaded) {
+            if (detection != null || request.framesTried >= request.maxFrames || !OpenCv.isLoaded) {
                 if (pending.compareAndSet(request, null)) request.onResult(detection)
             }
         }
     }
 
     private fun detect(image: ImageProxy): PaperDetection? {
-        if (!openCvLoaded) return null
+        if (!OpenCv.isLoaded) return null
         val crop = image.cropRect
         val frame = FrameGeometry(
             bufferWidth = image.width,

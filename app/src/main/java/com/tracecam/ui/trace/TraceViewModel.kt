@@ -29,6 +29,8 @@ data class TraceUiState(
     val opacity: Float = DEFAULT_OPACITY,
     val overlayMatrix: List<Float>? = null,
     val locked: Boolean = false,
+    val flipped: Boolean = false,
+    val outlineMode: Boolean = false,
     val autoFitStatus: AutoFitStatus = AutoFitStatus.Idle,
 ) {
     companion object {
@@ -57,6 +59,16 @@ class TraceViewModel : ViewModel() {
 
     fun setLocked(locked: Boolean) {
         _uiState.update { it.copy(locked = locked) }
+    }
+
+    /** Mirrors the overlay image left-to-right, within its current placement. */
+    fun toggleFlipped() {
+        _uiState.update { it.copy(flipped = !it.flipped) }
+    }
+
+    /** Shows only the image's edges instead of the full image. */
+    fun setOutlineMode(enabled: Boolean) {
+        _uiState.update { it.copy(outlineMode = enabled) }
     }
 
     /** Called when the overlay's size changes, e.g. after screen rotation. */

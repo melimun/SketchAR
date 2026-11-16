@@ -16,6 +16,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -68,8 +69,11 @@ import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
 import com.tracecam.R
+import com.tracecam.imaging.createOutlineBitmap
 import com.tracecam.ui.hasCameraPermission
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -128,6 +132,8 @@ fun TraceScreen(
                     state = uiState,
                     onAutoFit = viewModel::autoFit,
                     onLockedChange = viewModel::setLocked,
+                    onToggleFlipped = viewModel::toggleFlipped,
+                    onOutlineModeChange = viewModel::setOutlineMode,
                     onOpacityChange = viewModel::setOpacity,
                     onDismissMessage = viewModel::dismissAutoFitMessage,
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -194,6 +200,17 @@ private fun TraceOverlay(
         loaded?.let { currentOnImageLoaded(it.width, it.height) }
     }
 
+    // Edge-only version of the image, built in the background the first time it's needed.
+    var outline by remember(bitmap) { mutableStateOf<Bitmap?>(null) }
+    if (state.outlineMode) {
+        LaunchedEffect(bitmap) {
+            val source = bitmap ?: return@LaunchedEffect
+            if (outline == null) {
+                outline = withContext(Dispatchers.Default) { createOutlineBitmap(source) }
+            }
+        }
+    }
+
     val currentOnTransform by rememberUpdatedState(onTransform)
     val gestures = if (state.locked) {
         Modifier
@@ -212,10 +229,13 @@ private fun TraceOverlay(
             .onSizeChanged { onViewSize(it.width, it.height) }
             .then(gestures),
     ) {
-        val image = bitmap ?: return@Canvas
+        val original = bitmap ?: return@Canvas
+        // Fall back to the full image while the outline is still being generated.
+        val image = if (state.outlineMode) outline ?: original else original
         val values = state.overlayMatrix ?: return@Canvas
         drawMatrix.setValues(values.toFloatArray())
-        // The state matrix maps the unit square; scale the bitmap down to it first.
+        // Pre-transforms apply in reverse order: bitmap pixels → unit square → mirror → placement.
+        if (state.flipped) drawMatrix.preScale(-1f, 1f, 0.5f, 0.5f)
         drawMatrix.preScale(1f / image.width, 1f / image.height)
         paint.alpha = (state.opacity * 255).roundToInt()
         drawIntoCanvas { it.nativeCanvas.drawBitmap(image, drawMatrix, paint) }
@@ -227,6 +247,8 @@ private fun TraceControls(
     state: TraceUiState,
     onAutoFit: () -> Unit,
     onLockedChange: (Boolean) -> Unit,
+    onToggleFlipped: () -> Unit,
+    onOutlineModeChange: (Boolean) -> Unit,
     onOpacityChange: (Float) -> Unit,
     onDismissMessage: () -> Unit,
     modifier: Modifier = Modifier,
@@ -265,9 +287,9 @@ private fun TraceControls(
             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
         ) {
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically,
                 ) {
                     val detecting = state.autoFitStatus == AutoFitStatus.Detecting
                     FilledTonalButton(onClick = onAutoFit, enabled = !detecting) {
@@ -294,6 +316,16 @@ private fun TraceControls(
                                 modifier = Modifier.size(FilterChipDefaults.IconSize),
                             )
                         },
+                    )
+                    FilterChip(
+                        selected = state.flipped,
+                        onClick = onToggleFlipped,
+                        label = { Text("Flip") },
+                    )
+                    FilterChip(
+                        selected = state.outlineMode,
+                        onClick = { onOutlineModeChange(!state.outlineMode) },
+                        label = { Text("Outline") },
                     )
                 }
                 Row(
