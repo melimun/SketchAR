@@ -36,3 +36,13 @@ Carthage/Build/
 
 # Logs
 *.log
+
+# Android / Gradle
+.gradle/
+.kotlin/
+local.properties
+captures/
+*.apk
+*.aab
+.externalNativeBuild/
+.cxx/
