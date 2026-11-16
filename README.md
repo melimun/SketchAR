@@ -1,3 +1,11 @@
+<p align="center">
+  <img height="500" alt="Screen_Recording_20261116_142943_SketchAR" src="https://github.com/user-attachments/assets/97bda9c2-9777-4105-b151-da9e827a0c4d" />
+  &nbsp;&nbsp;
+  <img height="500" alt="Screen_Recording_20261116_142943_SketchAR1" src="https://github.com/user-attachments/assets/741ba0ec-c4f8-4670-878e-d1b68ac47a41" />
+</p>
+
+
+
 # Sketch AR
 
 Sketch AR is an Android app that helps you trace a reference image onto paper. It shows your camera feed with the image laid over it, semi-transparent, so you can follow the lines with a pencil.
