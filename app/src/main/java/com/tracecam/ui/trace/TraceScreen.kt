@@ -2,16 +2,19 @@ package com.tracecam.ui.trace
 
 import android.Manifest
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import android.graphics.Paint
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,9 +22,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -29,6 +37,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,12 +48,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -52,13 +62,18 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil3.compose.AsyncImage
+import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
-import coil3.size.Dimension
-import coil3.size.Size
+import coil3.request.SuccessResult
+import coil3.request.allowHardware
+import coil3.toBitmap
 import com.tracecam.R
 import com.tracecam.ui.hasCameraPermission
+import kotlinx.coroutines.delay
+import kotlin.math.max
 import kotlin.math.roundToInt
+
+private const val NOT_FOUND_MESSAGE_MS = 3_000L
 
 @Composable
 fun TraceScreen(
@@ -95,6 +110,7 @@ fun TraceScreen(
             } else {
                 CameraPreview(
                     modifier = Modifier.fillMaxSize(),
+                    analyzer = viewModel.paperAnalyzer,
                     onError = { cameraError = true },
                 )
             }
@@ -103,12 +119,17 @@ fun TraceScreen(
                 TraceOverlay(
                     imageUri = imageUri,
                     state = uiState,
+                    onViewSize = viewModel::onViewSize,
+                    onImageLoaded = viewModel::onImageLoaded,
                     onTransform = viewModel::onTransform,
                     modifier = Modifier.fillMaxSize(),
                 )
-                OpacitySlider(
-                    opacity = uiState.opacity,
+                TraceControls(
+                    state = uiState,
+                    onAutoFit = viewModel::autoFit,
+                    onLockedChange = viewModel::setLocked,
                     onOpacityChange = viewModel::setOpacity,
+                    onDismissMessage = viewModel::dismissAutoFitMessage,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
@@ -140,85 +161,160 @@ fun TraceScreen(
 }
 
 /**
- * The picked image, initially centred and scaled to the screen width. Gestures anywhere on
- * screen move (drag), resize (pinch) and rotate (two-finger twist) it.
+ * Draws the picked image through [TraceUiState.overlayMatrix], which may include perspective
+ * after Auto-fit. Unless locked, gestures anywhere on screen move (drag), resize (pinch) and
+ * rotate (two-finger twist) it.
  */
 @Composable
 private fun TraceOverlay(
     imageUri: Uri,
     state: TraceUiState,
-    onTransform: (centroid: Offset, pan: Offset, zoom: Float, rotation: Float, center: Offset) -> Unit,
+    onViewSize: (width: Int, height: Int) -> Unit,
+    onImageLoaded: (width: Int, height: Int) -> Unit,
+    onTransform: (centroid: Offset, pan: Offset, zoom: Float, rotation: Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    // Decode no larger than the screen's longest side so big photos are downsampled. Using
+    // the longest side keeps the size stable across rotation.
+    val maxDimension = LocalWindowInfo.current.containerSize
+        .let { max(it.width, it.height) }
+        .coerceAtLeast(1)
+    var bitmap by remember(imageUri) { mutableStateOf<Bitmap?>(null) }
+    val currentOnImageLoaded by rememberUpdatedState(onImageLoaded)
+    LaunchedEffect(imageUri, maxDimension) {
+        val request = ImageRequest.Builder(context)
+            .data(imageUri)
+            .size(maxDimension)
+            .allowHardware(false) // drawn with a perspective matrix on the canvas
+            .build()
+        val result = SingletonImageLoader.get(context).execute(request)
+        val loaded = (result as? SuccessResult)?.image?.toBitmap()
+        bitmap = loaded
+        loaded?.let { currentOnImageLoaded(it.width, it.height) }
+    }
+
     val currentOnTransform by rememberUpdatedState(onTransform)
-    BoxWithConstraints(
-        modifier = modifier.pointerInput(Unit) {
+    val gestures = if (state.locked) {
+        Modifier
+    } else {
+        Modifier.pointerInput(Unit) {
             detectTransformGestures { centroid, pan, zoom, rotation ->
-                val center = Offset(size.width / 2f, size.height / 2f)
-                currentOnTransform(centroid, pan, zoom, rotation, center)
+                currentOnTransform(centroid, pan, zoom, rotation)
             }
-        },
-        contentAlignment = Alignment.Center,
-    ) {
-        val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
-        // Decode at screen width so large photos are downsampled instead of loaded at full size.
-        val request = remember(imageUri, widthPx) {
-            ImageRequest.Builder(context)
-                .data(imageUri)
-                .size(Size(Dimension(widthPx), Dimension.Undefined))
-                .build()
         }
-        AsyncImage(
-            model = request,
-            contentDescription = "Image being traced",
-            contentScale = ContentScale.FillWidth,
-            modifier = Modifier
-                .fillMaxWidth()
-                .graphicsLayer {
-                    translationX = state.offsetX
-                    translationY = state.offsetY
-                    scaleX = state.scale
-                    scaleY = state.scale
-                    rotationZ = state.rotation
-                    alpha = state.opacity
-                },
-        )
+    }
+
+    val drawMatrix = remember { Matrix() }
+    val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG) }
+    Canvas(
+        modifier = modifier
+            .onSizeChanged { onViewSize(it.width, it.height) }
+            .then(gestures),
+    ) {
+        val image = bitmap ?: return@Canvas
+        val values = state.overlayMatrix ?: return@Canvas
+        drawMatrix.setValues(values.toFloatArray())
+        // The state matrix maps the unit square; scale the bitmap down to it first.
+        drawMatrix.preScale(1f / image.width, 1f / image.height)
+        paint.alpha = (state.opacity * 255).roundToInt()
+        drawIntoCanvas { it.nativeCanvas.drawBitmap(image, drawMatrix, paint) }
     }
 }
 
 @Composable
-private fun OpacitySlider(
-    opacity: Float,
+private fun TraceControls(
+    state: TraceUiState,
+    onAutoFit: () -> Unit,
+    onLockedChange: (Boolean) -> Unit,
     onOpacityChange: (Float) -> Unit,
+    onDismissMessage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
+    if (state.autoFitStatus == AutoFitStatus.NotFound) {
+        LaunchedEffect(Unit) {
+            delay(NOT_FOUND_MESSAGE_MS)
+            onDismissMessage()
+        }
+    }
+
+    Column(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(16.dp),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        if (state.autoFitStatus == AutoFitStatus.NotFound) {
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.inverseSurface,
+            ) {
+                Text(
+                    text = "Couldn't find the paper. Try placing the paper on a darker surface.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                )
+            }
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
         ) {
-            Text("Opacity", style = MaterialTheme.typography.labelLarge)
-            Slider(
-                value = opacity,
-                onValueChange = onOpacityChange,
-                valueRange = TraceUiState.MIN_OPACITY..TraceUiState.MAX_OPACITY,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = "${(opacity * 100).roundToInt()}%",
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.widthIn(min = 40.dp),
-                textAlign = TextAlign.End,
-            )
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    val detecting = state.autoFitStatus == AutoFitStatus.Detecting
+                    FilledTonalButton(onClick = onAutoFit, enabled = !detecting) {
+                        if (detecting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Text("Detecting…", modifier = Modifier.padding(start = 8.dp))
+                        } else {
+                            Text("Auto-fit")
+                        }
+                    }
+                    FilterChip(
+                        selected = state.locked,
+                        onClick = { onLockedChange(!state.locked) },
+                        label = { Text(if (state.locked) "Locked" else "Lock") },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(
+                                    if (state.locked) R.drawable.ic_lock else R.drawable.ic_lock_open,
+                                ),
+                                contentDescription = null,
+                                modifier = Modifier.size(FilterChipDefaults.IconSize),
+                            )
+                        },
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("Opacity", style = MaterialTheme.typography.labelLarge)
+                    Slider(
+                        value = state.opacity,
+                        onValueChange = onOpacityChange,
+                        valueRange = TraceUiState.MIN_OPACITY..TraceUiState.MAX_OPACITY,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "${(state.opacity * 100).roundToInt()}%",
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.widthIn(min = 40.dp),
+                        textAlign = TextAlign.End,
+                    )
+                }
+            }
         }
     }
 }
