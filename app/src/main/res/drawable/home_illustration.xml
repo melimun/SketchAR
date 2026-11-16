@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder illustration: a sheet of paper with a decorative border and a pencil. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="220dp"
+    android:height="220dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+    <!-- Paper -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#000000"
+        android:strokeWidth="3"
+        android:strokeLineJoin="round"
+        android:pathData="M36,24 L144,24 L144,168 L36,168 Z" />
+    <!-- Border design -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#B4C299"
+        android:strokeWidth="4"
+        android:pathData="M50,38 L130,38 L130,154 L50,154 Z" />
+    <path
+        android:fillColor="#C274B5"
+        android:pathData="M50,32 A6,6 0 1,1 49.99,32 Z M130,32 A6,6 0 1,1 129.99,32 Z M50,148 A6,6 0 1,1 49.99,148 Z M130,148 A6,6 0 1,1 129.99,148 Z" />
+    <!-- Sketched vine -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#C274B5"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M64,138 C70,112 92,118 92,94 C92,74 108,70 114,56" />
+    <path
+        android:fillColor="#B4C299"
+        android:strokeColor="#000000"
+        android:strokeWidth="1.5"
+        android:pathData="M80,116 C70,108 66,100 72,96 C80,98 82,108 80,116 Z M100,80 C110,76 116,80 114,86 C106,88 102,84 100,80 Z" />
+    <!-- Pencil body -->
+    <path
+        android:fillColor="#E8B04B"
+        android:strokeColor="#000000"
+        android:strokeWidth="2.5"
+        android:strokeLineJoin="round"
+        android:pathData="M118,170 L106,158 L160,104 L172,116 Z" />
+    <!-- Pencil eraser -->
+    <path
+        android:fillColor="#C274B5"
+        android:strokeColor="#000000"
+        android:strokeWidth="2.5"
+        android:strokeLineJoin="round"
+        android:pathData="M160,104 L168,96 L180,108 L172,116 Z" />
+    <!-- Pencil tip -->
+    <path
+        android:fillColor="#F3D9A4"
+        android:strokeColor="#000000"
+        android:strokeWidth="2.5"
+        android:strokeLineJoin="round"
+        android:pathData="M106,158 L118,170 L98,178 Z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M98,178 L101,171 L105,175 Z" />
+</vector>
